@@ -126,6 +126,40 @@ $vcpkgExe = Join-Path $VcpkgRoot "vcpkg.exe"
 & "$VcpkgRoot\bootstrap-vcpkg.bat" -disableMetrics
 if (-not (Test-Path $vcpkgExe)) { throw "vcpkg bootstrap failed." }
 
+# ---------------------------------------------------------------------------
+# Repair rotted tool download URLs.
+# Old vcpkg tags reference build tools (7zip, nasm, ...) from vendor sites that
+# only keep the LATEST version, so the pinned-version URLs now 404. We repoint
+# the dead URLs to the Wayback Machine's raw capture (the "id_" form returns the
+# original bytes unchanged, so vcpkg's SHA512 verification still passes).
+$vcpkgToolsXml = Join-Path $VcpkgRoot "scripts\vcpkgTools.xml"
+if (Test-Path $vcpkgToolsXml) {
+    $toolsContent = Get-Content $vcpkgToolsXml -Raw
+    $original = $toolsContent
+
+    # Hosts known to drop old releases. Wayback serves the exact archived bytes.
+    $deadHostPatterns = @(
+        'https://www\.7-zip\.org/a/[^<"\s]+',
+        'https://www\.nasm\.us/[^<"\s]+'
+    )
+    foreach ($pattern in $deadHostPatterns) {
+        $toolsContent = [System.Text.RegularExpressions.Regex]::Replace(
+            $toolsContent,
+            $pattern,
+            {
+                param($m)
+                $url = $m.Value
+                if ($url -like 'https://web.archive.org/*') { return $url }
+                return "https://web.archive.org/web/2022id_/$url"
+            })
+    }
+
+    if ($toolsContent -ne $original) {
+        Set-Content -Path $vcpkgToolsXml -Value $toolsContent -Encoding UTF8
+        Write-Host "Repaired rotted tool download URLs in vcpkgTools.xml (via Wayback Machine)." -ForegroundColor Yellow
+    }
+}
+
 # Optionally generate release-only overlay triplets to halve build time and to
 # skip the debug UWP build that fails for OpenSSL.
 $overlayArgs = @()
