@@ -4,12 +4,48 @@ using System.Linq;
 using System.Threading.Tasks;
 using Windows.ApplicationModel.Activation;
 using Windows.ApplicationModel.Background;
+using Windows.Storage;
 using Windows.UI.Notifications;
 
 namespace Unigram.Common
 {
     public class Toast
     {
+        /// <summary>
+        /// In-process background task that periodically wakes TDLib to fetch and show
+        /// notifications, since Windows 10 Mobile no longer receives Telegram WNS pushes.
+        /// </summary>
+        public const string RefreshTaskName = "RefreshTask";
+
+        private const string RefreshIntervalKey = "BackgroundRefreshInterval";
+        private const uint DefaultRefreshInterval = 15;
+
+        /// <summary>
+        /// Valid background refresh intervals, in minutes. 0 means "Off".
+        /// 15 is the platform minimum for <see cref="TimeTrigger"/>.
+        /// </summary>
+        public static readonly uint[] RefreshIntervals = { 0, 15, 30, 60 };
+
+        /// <summary>
+        /// The configured background refresh interval in minutes (0 = Off).
+        /// </summary>
+        public static uint BackgroundRefreshInterval
+        {
+            get
+            {
+                if (ApplicationData.Current.LocalSettings.Values.TryGetValue(RefreshIntervalKey, out object value) && value is int minutes && minutes >= 0)
+                {
+                    return (uint)minutes;
+                }
+
+                return DefaultRefreshInterval;
+            }
+            set
+            {
+                ApplicationData.Current.LocalSettings.Values[RefreshIntervalKey] = (int)value;
+            }
+        }
+
         public static async Task RegisterBackgroundTasks()
         {
             try
@@ -34,6 +70,50 @@ namespace Unigram.Common
                 //Register("NewNotificationTask2", null, () => new PushNotificationTrigger());
                 Register("NewInteractiveTask", null, () => new ToastNotificationActionTrigger());
                 //BackgroundTaskManager.Register("InteractiveTask", "Unigram.Tasks.InteractiveTask", new ToastNotificationActionTrigger());
+
+                RegisterRefreshTask();
+            }
+            catch { }
+        }
+
+        /// <summary>
+        /// (Re)registers the periodic refresh task to match <see cref="BackgroundRefreshInterval"/>.
+        /// Call this after changing the interval to apply it immediately. When the interval is 0
+        /// the task is unregistered.
+        /// </summary>
+        public static void RegisterRefreshTask()
+        {
+            try
+            {
+                var interval = BackgroundRefreshInterval;
+
+                BackgroundTaskRegistration existing = null;
+                foreach (var t in BackgroundTaskRegistration.AllTasks)
+                {
+                    if (t.Value.Name == RefreshTaskName)
+                    {
+                        existing = t.Value as BackgroundTaskRegistration;
+                        break;
+                    }
+                }
+
+                // Always unregister first: the interval may have changed and the
+                // existing registration's period can't be read back to compare.
+                existing?.Unregister(true);
+
+                if (interval == 0)
+                {
+                    return;
+                }
+
+                var builder = new BackgroundTaskBuilder
+                {
+                    Name = RefreshTaskName
+                };
+
+                builder.SetTrigger(new TimeTrigger(interval, false));
+                builder.AddCondition(new SystemCondition(SystemConditionType.InternetAvailable));
+                builder.Register();
             }
             catch { }
         }

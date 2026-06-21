@@ -586,6 +586,7 @@
     <Compile Include="Services\SettingsLegacy\JsonMapping.cs" />
     <Compile Include="Services\SettingsLegacy\SettingsService.cs" />
     <Compile Include="Services\Settings\AppearanceSettings.cs" />
+    <Compile Include="Services\BackgroundSyncService.cs" />
     <Compile Include="Services\ContactsService.cs" />
     <Compile Include="Services\DeviceInfoService.cs" />
     <Compile Include="Services\EventAggregator.cs" />

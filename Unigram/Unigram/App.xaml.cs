@@ -307,6 +307,16 @@ namespace Unigram
                         }
                     }
                 }
+                else if (string.Equals(args.TaskInstance.Task?.Name, Toast.RefreshTaskName, StringComparison.Ordinal))
+                {
+                    // Periodic local refresh: WNS push is unavailable on Windows 10 Mobile,
+                    // so wake TDLib and let it deliver any pending notifications as toasts.
+                    try
+                    {
+                        await BackgroundSyncService.SyncAsync(TimeSpan.FromMinutes(8));
+                    }
+                    catch { }
+                }
 
                 deferral.Complete();
             }

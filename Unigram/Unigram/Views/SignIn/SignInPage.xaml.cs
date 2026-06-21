@@ -43,7 +43,7 @@ namespace Unigram.Views.SignIn
         private string GetVersion()
         {
             PackageVersion version = Services.SettingsService.GetAppVersion();
-            return $"{version.Major}.{version.Minor}.{version.Build}";
+            return $"{version.Major}.{version.Minor:D2}.{version.Build}";
         }
 
         private void OnPropertyChanged(object sender, System.ComponentModel.PropertyChangedEventArgs e)

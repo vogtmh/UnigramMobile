@@ -1,0 +1,102 @@
+TDLib UPGRADE — PHASE 3 SOURCE MIGRATION (GATED — DO NOT APPLY UNTIL THE NEW VSIX IS BUILT)
+==========================================================================================
+
+These changes are required ONLY when you upgrade to a TDLib build that uses the
+new schema (TDLib >= 1.8.6), where the `tdlibParameters` object was removed and
+its fields were merged directly into `setTdlibParameters`, and
+`checkDatabaseEncryptionKey` was removed (the encryption key is now a field on
+`setTdlibParameters`).
+
+Applying these BEFORE the matching Telegram.Td.UWP VSIX is installed will break
+the current build, because the current VSIX (TDLib ~1.7.x) still exposes the old
+`TdlibParameters` type.
+
+Verify against the EXACT TDLib version you built: open the generated
+Telegram.Td.Api namespace and check whether `TdlibParameters` and
+`CheckDatabaseEncryptionKey` still exist. If they do, KEEP the current code.
+
+
+1) ProtoService.Initialize()  — Unigram/Unigram/Services/ProtoService.cs
+------------------------------------------------------------------------
+
+CURRENT (old schema, ~line 214 and ~line 334):
+
+    var parameters = new TdlibParameters
+    {
+        DatabaseDirectory = ...,
+        UseSecretChats = true,
+        UseMessageDatabase = true,
+        ApiId = Constants.ApiId,
+        ApiHash = Constants.ApiHash,
+        ApplicationVersion = ...,
+        SystemVersion = ...,
+        SystemLanguageCode = ...,
+        DeviceModel = ...,
+        UseTestDc = _settings.UseTestDC
+    };
+    if (_settings.FilesDirectory != null) { parameters.FilesDirectory = _settings.FilesDirectory; }
+    ...
+    _client.Send(new SetTdlibParameters(parameters));
+    _client.Send(new CheckDatabaseEncryptionKey(new byte[0]));
+
+NEW schema (TDLib >= 1.8.6) — the fields move onto SetTdlibParameters and the
+database encryption key becomes the first constructor argument / DatabaseEncryptionKey
+field. Remove the CheckDatabaseEncryptionKey call entirely:
+
+    var parameters = new SetTdlibParameters
+    {
+        DatabaseEncryptionKey = new byte[0],
+        DatabaseDirectory = System.IO.Path.Combine(ApplicationData.Current.LocalFolder.Path, $"{_session}"),
+        UseSecretChats = true,
+        UseMessageDatabase = true,
+        ApiId = Constants.ApiId,
+        ApiHash = Constants.ApiHash,
+        ApplicationVersion = _deviceInfoService.ApplicationVersion,
+        SystemVersion = _deviceInfoService.SystemVersion,
+        SystemLanguageCode = _deviceInfoService.SystemLanguageCode,
+        DeviceModel = _deviceInfoService.DeviceModel,
+        UseTestDc = _settings.UseTestDC
+    };
+    if (_settings.FilesDirectory != null) { parameters.FilesDirectory = _settings.FilesDirectory; }
+    ...
+    _client.Send(parameters);
+    // CheckDatabaseEncryptionKey removed — key is now part of SetTdlibParameters.
+
+NOTE: exact field names (e.g. UseTestDc vs UseTestDC, FilesDirectory) follow the
+generated C# casing of the version you build — let IntelliSense confirm them.
+
+
+2) #if MOCKUP positional constructors — ProtoService.cs (~line 233 onward)
+-------------------------------------------------------------------------
+
+The MOCKUP block builds User(...), Supergroup(...), Chat(...), Message(...),
+ProfilePhoto(...), ChatPhoto(...) etc. using POSITIONAL constructors. TDLib's
+generated constructors change parameter order/count between versions, so the
+MOCKUP block will fail to compile after an upgrade.
+
+Action: rebuild the MOCKUP block against the new constructors, or switch to
+object-initializer syntax (new User { Id = ..., FirstName = ... }) which is
+resilient to added fields. MOCKUP is a design-time-only path (#if MOCKUP), so it
+does not affect release builds — fix it last, or temporarily exclude it.
+
+
+3) ID type widening audit — NotificationsService.ProcessAsync and callers
+-------------------------------------------------------------------------
+
+In the current (~1.7.x) headers, chat/user/supergroup IDs are already `long`,
+but secret-chat and sticker IDs are still `int`. Newer TDLib widens more IDs to
+`long`. Audit for `int.TryParse(...)` / `(int)` casts on IDs and for
+CreatePrivateChat(fromId, ...) style calls, and widen locals to `long` as the
+compiler flags them.
+
+
+4) Recommended verification order
+---------------------------------
+  a. Build the new VSIX with Build-TdLib.ps1 and install it locally.
+  b. Apply change (1). Build for x86 (Debug) against the local machine /
+     emulator first — fastest iteration.
+  c. Fix compiler errors surfaced by (3) as they appear.
+  d. Fix the MOCKUP block (2) or exclude it until the end.
+  e. Once x86 builds and runs, build ARM Release for the device.
+  f. Smoke-test: login, receive messages, and confirm the background refresh
+     (Phase 1) still delivers toasts.

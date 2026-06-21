@@ -385,7 +385,7 @@ namespace Unigram.Services
                 if (response is Chat chat)
                 {
                     Windows.ApplicationModel.PackageVersion version = SettingsService.GetAppVersion();
-                    var title = $"**{Windows.ApplicationModel.Package.Current.DisplayName} Version {version.Major}.{version.Minor}**";
+                    var title = $"**{Windows.ApplicationModel.Package.Current.DisplayName} Version {version.Major}.{version.Minor:D2}**";
                     title += Environment.NewLine + Environment.NewLine + $"Beta Build {version.Build}. Thanks for taking the risk and time testing this beta release. Please use the beta group for any feedback.";
                     var message = title + Environment.NewLine + Environment.NewLine + SettingsService.CurrentChangelog;
 

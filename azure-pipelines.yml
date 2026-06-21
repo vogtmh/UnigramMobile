@@ -21,6 +21,11 @@ steps:
 
 - task: CmdLine@2
   displayName: 'Install tdlib extension'
+  # The TDLib "Telegram.Td.UWP" Extension SDK is consumed as a prebuilt VSIX kept
+  # on the 'tdlib' branch as tdlib.vsix. To upgrade TDLib, rebuild that VSIX with
+  # build/tdlib/Build-TdLib.ps1 (keep SdkVersion 1.0 so SDKReferences resolve),
+  # publish it on the 'tdlib' branch, and — if you built TDLib >= 1.8.6 — also
+  # apply build/tdlib/PHASE3-MIGRATION.notes before merging.
   inputs:
     script: |
       echo Checkout tdlib VSIX branch

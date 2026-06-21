@@ -38,7 +38,7 @@ $identity.Attributes["Name"].Value = $h[$config]
 
 $version = $identity.Attributes["Version"].Value;
 $regex = [regex]'(?:(\d+)\.)(?:(\d+)\.)(?:(\d*?)\.\d+)'
-$date = Get-Date -Format yy.M
+$date = Get-Date -Format yy.MM
 
 $identity.Attributes["Version"].Value = -join($date, $regex.Replace($version, '.{0}.0' -f $out))
 
