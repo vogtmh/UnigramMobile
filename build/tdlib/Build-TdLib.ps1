@@ -67,6 +67,16 @@ param(
     [string] $WorkRoot = "$PSScriptRoot\work",
     [ValidateSet("ARM", "x86", "x64")]
     [string[]] $Architectures = @("ARM", "x86", "x64"),
+    # vcpkg release tag to pin. IMPORTANT: the latest vcpkg ships OpenSSL 3.x,
+    # which does NOT build for *-uwp with the VS2017 (v141) toolset. This tag is
+    # the last vcpkg release whose baseline still uses OpenSSL 1.1.1n, which is
+    # what TDLib 1.6.x/1.7.x expects and which builds for UWP. If OpenSSL still
+    # fails, drop to an even older tag (e.g. 2021.05.12).
+    [string] $VcpkgRef = "2022.06.16.1",
+    # Build dependencies release-only: halves vcpkg time and skips the debug
+    # build (the UWP debug build is the one that was failing). The app's Release
+    # configuration only needs the release libraries anyway.
+    [switch] $ReleaseOnlyDeps = $true,
     [switch] $PackageVsix
 )
 
@@ -94,14 +104,51 @@ $tripletMap = @{
 # ---------------------------------------------------------------------------
 # 1. vcpkg + dependencies (OpenSSL, zlib) for each UWP triplet
 # ---------------------------------------------------------------------------
-Write-Host "== Preparing vcpkg ==" -ForegroundColor Cyan
+Write-Host "== Preparing vcpkg ($VcpkgRef) ==" -ForegroundColor Cyan
 if (-not (Test-Path "$VcpkgRoot\.git")) {
     git clone https://github.com/microsoft/vcpkg "$VcpkgRoot"
 }
 
+# Pin vcpkg to a tag that still ships OpenSSL 1.1.1 (see -VcpkgRef note above).
+Push-Location $VcpkgRoot
+try {
+    git fetch --all --tags
+    $currentRef = (git rev-parse --abbrev-ref HEAD 2>$null)
+    git checkout $VcpkgRef
+    if ($LASTEXITCODE -ne 0) { throw "Could not check out vcpkg ref '$VcpkgRef'." }
+}
+finally {
+    Pop-Location
+}
+
+# (Re)bootstrap so vcpkg.exe matches the pinned tree.
 $vcpkgExe = Join-Path $VcpkgRoot "vcpkg.exe"
-if (-not (Test-Path $vcpkgExe)) {
-    & "$VcpkgRoot\bootstrap-vcpkg.bat" -disableMetrics
+& "$VcpkgRoot\bootstrap-vcpkg.bat" -disableMetrics
+if (-not (Test-Path $vcpkgExe)) { throw "vcpkg bootstrap failed." }
+
+# Optionally generate release-only overlay triplets to halve build time and to
+# skip the debug UWP build that fails for OpenSSL.
+$overlayArgs = @()
+if ($ReleaseOnlyDeps) {
+    $overlayDir = Join-Path $WorkRoot "triplets"
+    New-Item -ItemType Directory -Force -Path $overlayDir | Out-Null
+    foreach ($arch in $Architectures) {
+        $triplet = $tripletMap[$arch]
+        $src = Join-Path $VcpkgRoot "triplets\community\$triplet.cmake"
+        if (-not (Test-Path $src)) {
+            $src = Join-Path $VcpkgRoot "triplets\$triplet.cmake"
+        }
+        if (-not (Test-Path $src)) {
+            throw "Could not find base triplet file for '$triplet' in the vcpkg checkout."
+        }
+        $dst = Join-Path $overlayDir "$triplet.cmake"
+        $content = Get-Content $src -Raw
+        if ($content -notmatch "VCPKG_BUILD_TYPE") {
+            $content += "`nset(VCPKG_BUILD_TYPE release)`n"
+        }
+        Set-Content -Path $dst -Value $content -Encoding ASCII
+    }
+    $overlayArgs = @("--overlay-triplets=$overlayDir")
 }
 
 # gperf is a host build tool TDLib needs during generation.
@@ -113,7 +160,7 @@ foreach ($arch in $Architectures) {
 }
 
 Write-Host "Installing: $($packages -join ', ')"
-& $vcpkgExe install @packages
+& $vcpkgExe install @packages @overlayArgs
 if ($LASTEXITCODE -ne 0) { throw "vcpkg install failed." }
 
 # Make gperf discoverable for TDLib's CMake generation.
